@@ -1,19 +1,26 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const mailer = require('../../modules/mailer');
 
-const authConfig = require('../config/auth');
+
+const authConfig = require('../../config/auth.json');
 
 const User = require('../models/User');
 
 const router = express.Router();
 
+//Gerar Token
 
 function generateToken(params = {}) {
     return jwt.sign(params, authConfig.secret, {
         expiresIn: 86400
     });
-}
+};
+
+//Registrar
+
 router.post('/register', async (req, res) => {
     const { email } = req.body;
     try {
@@ -31,6 +38,8 @@ router.post('/register', async (req, res) => {
         return res.status(400).send({ error: 'Registration failed' });
     }
 });
+
+//Autenticar
 
 router.post('/authenticate', async (req, res) => {
     const { email, password } = req.body;
@@ -51,5 +60,47 @@ router.post('/authenticate', async (req, res) => {
         token: generateToken({ id: user.id })
     });
 });
+
+//Envio de token para alterar a senha 
+router.post('/forgot_password', async (req, res) => {
+    const { email } = req.body;
+    try {
+        const user = await User.findOne({ email });
+
+        if (!user)
+            return res.status(400).send({ error: "User not found" });
+
+        const token = crypto.randomBytes(20).toString('hex');
+
+        const now = new Date();
+        now.setHours(now.getHours() + 1);
+
+        await User.findByIdAndUpdate(user.id, {
+            '$set': {
+                passwordResetToken: token,
+                passwordResetExpires: now
+            }
+        });
+
+        mailer.sendMail({
+            to: email,
+            from: 'bianca.duarte.barreto@hotmail.com',
+            template: 'auth/forgot_password',
+            context: { token }
+
+        }, (err) => {
+            if (err)
+                return res.status(400).send({ error: 'Cannot send forgot password email' });
+
+            return res.send();
+        }
+        );
+
+        console.log(token, now);
+    } catch (err) {
+        console.log(err);
+        return res.status(400).send({ error: 'Erro on forgot password, try again' });
+    }
+})
 
 module.exports = app => app.use('/auth', router);
